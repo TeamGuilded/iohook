@@ -79,7 +79,7 @@
     "jest": "^26.6.3",
     "lint-staged": "^11.0.0",
     "minimist": "^1.2.5",
-    "nan": "github:alexciarlillo/nan#fix_accessor_signature",
+    "nan": "github:alexciarlillo/nan#access_signature_fix",
     "node-abi": "^2.19.3",
     "node-gyp": "^8.4.0",
     "prebuild": "^10.0.1",
