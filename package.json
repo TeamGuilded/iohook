@@ -81,7 +81,7 @@
     "minimist": "^1.2.5",
     "nan": "github:jkleinsc/nan#remove_accessor_signature",
     "node-abi": "^2.19.3",
-    "node-gyp": "^7.1.2",
+    "node-gyp": "^8.4.0",
     "prebuild": "^10.0.1",
     "prettier": "^2.3.1",
     "robotjs": "^0.6.0",
