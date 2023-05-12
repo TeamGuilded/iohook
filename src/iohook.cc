@@ -391,10 +391,10 @@ void stop() {
       break;
   }
 
+  
+  #ifdef _WIN32
   // wait for hook thread clean exit
   WaitForSingleObject(hook_thread, INFINITE);
-
-  #ifdef _WIN32
   CloseHandle(hook_thread);
   DeleteCriticalSection(&hook_running_mutex);
   DeleteCriticalSection(&hook_control_mutex);
