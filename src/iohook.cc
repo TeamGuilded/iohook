@@ -12,6 +12,7 @@
 #define GetCurrentDir getcwd
 #endif
 
+#include <time.h>
 #include <stdio.h>
 #include <pthread.h>
 #endif
@@ -50,8 +51,19 @@ bool logger_proc(unsigned int level, const char *format, ...) {
   if (!sIsDebug) {
     return false;
   }
+
   bool status = false;
+
   va_list args;
+
+  time_t now = time(NULL);
+  struct tm *tm_info = localtime(&now);
+
+  char timestamp[20]; // Adjust as needed
+  strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", tm_info);
+
+  fprintf(logFile, "[%s] ", timestamp);
+
   switch (level) {
     case LOG_LEVEL_DEBUG:
     case LOG_LEVEL_INFO:
