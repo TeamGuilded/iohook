@@ -3,11 +3,16 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <direct.h>
+#define GetCurrentDir _getcwd
 #else
 #if defined(__APPLE__) && defined(__MACH__)
 #include <CoreFoundation/CoreFoundation.h>
+#include <unistd.h>
+#define GetCurrentDir getcwd
 #endif
 
+#include <stdio.h>
 #include <pthread.h>
 #endif
 #include <queue>
@@ -16,6 +21,8 @@ using namespace v8;
 using Callback = Nan::Callback;
 static bool sIsRunning = false;
 static bool sIsDebug = false;
+
+FILE * logFile;
 
 static HookProcessWorker* sIOHook = nullptr;
 
@@ -49,14 +56,14 @@ bool logger_proc(unsigned int level, const char *format, ...) {
     case LOG_LEVEL_DEBUG:
     case LOG_LEVEL_INFO:
       va_start(args, format);
-      status = vfprintf(stdout, format, args) >= 0;
+      status = vfprintf(logFile, format, args) >= 0;
       va_end(args);
       break;
 
     case LOG_LEVEL_WARN:
     case LOG_LEVEL_ERROR:
       va_start(args, format);
-      status = vfprintf(stderr, format, args) >= 0;
+      status = vfprintf(logFile, format, args) >= 0;
       va_end(args);
       break;
   }
@@ -402,6 +409,7 @@ void stop() {
   pthread_mutex_destroy(&hook_control_mutex);
   pthread_cond_destroy(&hook_control_cond);
   #endif
+  fclose(logFile);
 }
 
 HookProcessWorker::HookProcessWorker(Nan::Callback * callback) :
@@ -540,6 +548,12 @@ NAN_METHOD(StartHook) {
         sIsRunning = true;
       }
     }
+
+    #ifdef _WIN32
+    logFile = fopen("electron\\build_app\\iohook.log", "w");
+    #else
+    logFile = fopen("build_app/iohook.log", "w");
+    #endif
   }
 }
 
