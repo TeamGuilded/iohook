@@ -210,9 +210,10 @@ class IOHook extends EventEmitter {
    * @private
    */
   _handler(msg) {
+    console.log('iohook handler is active', this.active);
+    console.log('iohook handler msg', msg);
     if (this.active === false || !msg) return;
 
-    console.log('iohook handler', msg);
 
     if (events[msg.type]) {
       const event = msg.mouse || msg.keyboard || msg.wheel;
