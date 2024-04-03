@@ -212,6 +212,8 @@ class IOHook extends EventEmitter {
   _handler(msg) {
     if (this.active === false || !msg) return;
 
+    console.log('iohook handler', msg);
+
     if (events[msg.type]) {
       const event = msg.mouse || msg.keyboard || msg.wheel;
 
@@ -222,6 +224,7 @@ class IOHook extends EventEmitter {
       this._handleCtrl(event);
       this._handleMeta(event);
 
+      console.log('iohook emit', events[msg.type], event);
       this.emit(events[msg.type], event);
 
       // If there is any registered shortcuts then handle them.
