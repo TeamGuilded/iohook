@@ -14,6 +14,7 @@
 
 #include <time.h>
 #include <stdio.h>
+#include <string.h>
 #include <pthread.h>
 #endif
 #include <queue>
@@ -325,6 +326,12 @@ void run() {
 
       pthread_join(hook_thread, NULL);
       #endif
+
+      if (logFile != NULL) {
+        fclose(logFile);
+        logFile = NULL;
+      }
+
       break;
 
     // System level errors.
@@ -410,6 +417,13 @@ void stop() {
       break;
   }
 
+
+  if (logFile != NULL) {
+    fclose(logFile);
+    logFile = NULL;
+  }
+
+
   #ifdef _WIN32
   // wait for hook thread clean exit
   WaitForSingleObject(hook_thread, INFINITE);
@@ -421,7 +435,6 @@ void stop() {
   pthread_mutex_destroy(&hook_control_mutex);
   pthread_cond_destroy(&hook_control_cond);
   #endif
-  fclose(logFile);
 }
 
 HookProcessWorker::HookProcessWorker(Nan::Callback * callback) :
@@ -561,10 +574,23 @@ NAN_METHOD(StartHook) {
       }
     }
 
+    char buff[FILENAME_MAX];
+    GetCurrentDir(buff, FILENAME_MAX);
+
+    string* search = "electron";
+
     #ifdef _WIN32
-    logFile = fopen("electron\\build_app\\iohook.log", "w");
+    if (strstr(buff, search) != NULL) {
+      logFile = fopen("build_app\\iohook.log", "a");
+    } else {
+      logFile = fopen("electron\\build_app\\iohook.log", "a");
+    }
     #else
-    logFile = fopen("build_app/iohook.log", "w");
+    if (strstr(buff, search) != NULL) {
+      logFile = fopen("build_app/iohook.log", "a");
+    } else {
+      logFile = fopen("electron/build_app/iohook.log", "a");
+    }
     #endif
   }
 }
