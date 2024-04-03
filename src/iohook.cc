@@ -577,7 +577,7 @@ NAN_METHOD(StartHook) {
     char buff[FILENAME_MAX];
     GetCurrentDir(buff, FILENAME_MAX);
 
-    string* search = "electron";
+    char* search = "electron";
 
     #ifdef _WIN32
     if (strstr(buff, search) != NULL) {
