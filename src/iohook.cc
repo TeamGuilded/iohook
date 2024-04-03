@@ -24,7 +24,7 @@ using Callback = Nan::Callback;
 static bool sIsRunning = false;
 static bool sIsDebug = false;
 
-FILE * logFile;
+FILE * logFile = nullptr;
 
 static HookProcessWorker* sIOHook = nullptr;
 
@@ -327,9 +327,9 @@ void run() {
       pthread_join(hook_thread, NULL);
       #endif
 
-      if (logFile != NULL) {
+      if (logFile != nullptr) {
         fclose(logFile);
-        logFile = NULL;
+        logFile = nullptr;
       }
 
       break;
@@ -418,9 +418,9 @@ void stop() {
   }
 
 
-  if (logFile != NULL) {
+  if (logFile != nullptr) {
     fclose(logFile);
-    logFile = NULL;
+    logFile = nullptr;
   }
 
 
@@ -556,6 +556,28 @@ NAN_METHOD(StartHook) {
   //allow one single execution
   if (sIsRunning == false)
   {
+
+    if (logFile == nullptr) {
+      char buff[FILENAME_MAX];
+      GetCurrentDir(buff, FILENAME_MAX);
+
+      char* search = "electron";
+
+      #ifdef _WIN32
+      if (strstr(buff, search) != NULL) {
+        logFile = fopen("build_app\\iohook.log", "a");
+      } else {
+        logFile = fopen("electron\\build_app\\iohook.log", "a");
+      }
+      #else
+      if (strstr(buff, search) != NULL) {
+        logFile = fopen("build_app/iohook.log", "a");
+      } else {
+        logFile = fopen("electron/build_app/iohook.log", "a");
+      }
+      #endif
+    }
+
     if (info.Length() > 0)
     {
       if (info.Length() == 2) {
@@ -574,24 +596,7 @@ NAN_METHOD(StartHook) {
       }
     }
 
-    char buff[FILENAME_MAX];
-    GetCurrentDir(buff, FILENAME_MAX);
 
-    char* search = "electron";
-
-    #ifdef _WIN32
-    if (strstr(buff, search) != NULL) {
-      logFile = fopen("build_app\\iohook.log", "a");
-    } else {
-      logFile = fopen("electron\\build_app\\iohook.log", "a");
-    }
-    #else
-    if (strstr(buff, search) != NULL) {
-      logFile = fopen("build_app/iohook.log", "a");
-    } else {
-      logFile = fopen("electron/build_app/iohook.log", "a");
-    }
-    #endif
   }
 }
 
