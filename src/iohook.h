@@ -6,11 +6,11 @@
 
 #include "uiohook.h"
 
-class HookProcessWorker : public Nan::AsyncProgressWorkerBase<uiohook_event>
+class HookProcessWorker : public Nan::AsyncProgressQueueWorker<uiohook_event>
 {
   public:
   
-    typedef Nan::AsyncProgressWorkerBase<uiohook_event>::ExecutionProgress HookExecution;
+    typedef Nan::AsyncProgressQueueWorker<uiohook_event>::ExecutionProgress HookExecution;
   
     HookProcessWorker(Nan::Callback * callback);
   

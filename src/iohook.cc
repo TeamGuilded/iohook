@@ -405,7 +405,7 @@ void stop() {
 }
 
 HookProcessWorker::HookProcessWorker(Nan::Callback * callback) :
-Nan::AsyncProgressWorkerBase<uiohook_event>(callback),
+Nan::AsyncProgressQueueWorker<uiohook_event>(callback),
 fHookExecution(nullptr)
 {
 
@@ -493,7 +493,7 @@ void HookProcessWorker::HandleProgressCallback(const uiohook_event * event, size
   }
 }
 
-void HookProcessWorker::Execute(const Nan::AsyncProgressWorkerBase<uiohook_event>::ExecutionProgress& progress)
+void HookProcessWorker::Execute(const Nan::AsyncProgressQueueWorker<uiohook_event>::ExecutionProgress& progress)
 {
   fHookExecution = &progress;
   run();
