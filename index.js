@@ -210,8 +210,7 @@ class IOHook extends EventEmitter {
    * @private
    */
   _handler(msg) {
-    console.log('iohook handler is active', this.active);
-    console.log('iohook handler msg', msg);
+    console.log('iohook handler', Date.now(), {active: this.active, msg});
     if (this.active === false || !msg) return;
 
 
@@ -225,7 +224,6 @@ class IOHook extends EventEmitter {
       this._handleCtrl(event);
       this._handleMeta(event);
 
-      console.log('iohook emit', events[msg.type], event);
       this.emit(events[msg.type], event);
 
       // If there is any registered shortcuts then handle them.

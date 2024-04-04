@@ -12,7 +12,7 @@
 #define GetCurrentDir getcwd
 #endif
 
-#include <time.h>
+#include <sys/time.h>
 #include <stdio.h>
 #include <string.h>
 #include <pthread.h>
@@ -48,6 +48,12 @@ static pthread_mutex_t hook_control_mutex;
 static pthread_cond_t hook_control_cond;
 #endif
 
+long long current_time_milliseconds() {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return ((long long)tv.tv_sec * 1000) + (tv.tv_usec / 1000);
+}
+
 bool logger_proc(unsigned int level, const char *format, ...) {
   if (!sIsDebug) {
     return false;
@@ -57,13 +63,9 @@ bool logger_proc(unsigned int level, const char *format, ...) {
 
   va_list args;
 
-  time_t now = time(NULL);
-  struct tm *tm_info = localtime(&now);
+  long long milliseconds_since_epoch = current_time_milliseconds();
 
-  char timestamp[20]; // Adjust as needed
-  strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", tm_info);
-
-  fprintf(logFile, "[%s] ", timestamp);
+  fprintf(logFile, "[%lld] ", milliseconds_since_epoch);
 
   switch (level) {
     case LOG_LEVEL_DEBUG:
@@ -91,6 +93,8 @@ bool logger_proc(unsigned int level, const char *format, ...) {
 // takes to long to process.  If you need to do any extended processing, please
 // do so by copying the event to your own queued dispatch thread.
 void dispatch_proc(uiohook_event * const event) {
+  logger_proc(LOG_LEVEL_DEBUG,  "%s [%u]: dispatch_proc ENTER. type: %u | keycode: %#X.\n",
+        __FUNCTION__, __LINE__, event->type, event->data.keyboard.keycode);
   switch (event->type) {
     case EVENT_HOOK_ENABLED:
       // Lock the running mutex so we know if the hook is enabled.
@@ -144,6 +148,8 @@ void dispatch_proc(uiohook_event * const event) {
       uiohook_event event_copy;
       memcpy(&event_copy, event, sizeof(uiohook_event));
       zqueue.push(event_copy);
+      logger_proc(LOG_LEVEL_DEBUG,  "%s [%u]: dispatch_proc SEND. type: %u | keycode: %#X.\n",
+        __FUNCTION__, __LINE__, event->type, event->data.keyboard.keycode);
       sIOHook->fHookExecution->Send(event, sizeof(uiohook_event));
       break;
   }
@@ -520,6 +526,9 @@ void HookProcessWorker::HandleProgressCallback(const uiohook_event * event, size
     v8::Local<v8::Object> obj = fillEventObject(ev);
 
     v8::Local<v8::Value> argv[] = { obj };
+
+    logger_proc(LOG_LEVEL_DEBUG,  "%s [%u]: callback hit. type: %u | keycode: %#X.\n",
+        __FUNCTION__, __LINE__, event->type, event->data.keyboard.keycode);
     callback->Call(1, argv);
 
     zqueue.pop();
