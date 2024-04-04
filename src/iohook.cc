@@ -567,7 +567,7 @@ void HookProcessWorker::HandleProgressCallback(const uiohook_event * event, size
     v8::Local<v8::Value> argv[] = { obj };
 
     logger_proc(LOG_LEVEL_DEBUG,  "%s [%u]: callback called. type: %u | keycode: %#X.\n",
-        __FUNCTION__, __LINE__, ev->type, ev->data.keyboard.keycode);
+        __FUNCTION__, __LINE__, ev.type, ev.data.keyboard.keycode);
     callback->Call(1, argv);
 
     zqueue.pop();
