@@ -258,7 +258,7 @@ int hook_enable() {
   #endif
     #if defined(_WIN32)
     // Attempt to set the thread priority to time critical.
-    if (SetThreadPriority(hook_thread, THREAD_PRIORITY_TIME_CRITICAL) == 0) {
+    if (SetThreadPriority(hook_thread, THREAD_PRIORITY_HIGHEST) == 0) {
       logger_proc(LOG_LEVEL_WARN, "%s [%u]: Could not set thread priority %li for thread %#p! (%#lX)\n",
           __FUNCTION__, __LINE__, (long) THREAD_PRIORITY_TIME_CRITICAL,
           hook_thread, (unsigned long) GetLastError());
