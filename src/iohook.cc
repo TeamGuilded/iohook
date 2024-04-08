@@ -13,11 +13,17 @@
 #include <queue>
 
 using namespace Napi;
+
 static bool sIsRunning = false;
 static bool sIsDebug = false;
-static IOHookHandler* sIOHook = nullptr;
 
-static std::queue<uiohook_event> zqueue;
+using Context = Reference<Napi::Value>;
+using DataType = uiohook_event;
+void IOHookEventJsCallback(Env env, Function callback, Context * context, DataType * event);
+using TSFN = TypedThreadSafeFunction<Context, DataType, IOHookEventJsCallback>;
+
+TSFN tsfnOnIOHookEvent;
+
 
 // Native thread errors.
 #define UIOHOOK_ERROR_THREAD_CREATE       0x10
@@ -38,9 +44,10 @@ static pthread_cond_t hook_control_cond;
 #endif
 
 bool logger_proc(unsigned int level, const char *format, ...) {
-  if (!sIsDebug) {
-    return false;
-  }
+  // if (!sIsDebug) {
+  //   return false;
+  // }
+
   bool status = false;
   va_list args;
   switch (level) {
@@ -60,6 +67,22 @@ bool logger_proc(unsigned int level, const char *format, ...) {
   }
 
   return status;
+}
+
+void HandleEvent(const uiohook_event * event, size_t size)
+{
+  logger_proc(LOG_LEVEL_WARN, "%s [%u]: HANDLE EVENT\n", __FUNCTION__, __LINE__);
+
+  uiohook_event event_copy;
+  memcpy(&event_copy, event, sizeof(uiohook_event));
+
+  napi_status status = tsfnOnIOHookEvent.NonBlockingCall(&event_copy);
+
+  if (status != napi_ok) {
+    logger_proc(LOG_LEVEL_WARN, "%s [%u]: EVENT ERROR %u\n", __FUNCTION__, __LINE__, status);
+  }
+
+  logger_proc(LOG_LEVEL_WARN, "%s [%u]: DONE HANDLE EVENT %u\n", __FUNCTION__, __LINE__, status);
 }
 
 // NOTE: The following callback executes on the same thread that hook_run() is called
@@ -119,7 +142,7 @@ void dispatch_proc(uiohook_event * const event) {
     case EVENT_MOUSE_MOVED:
     case EVENT_MOUSE_DRAGGED:
     case EVENT_MOUSE_WHEEL:
-      sIOHook->HandleEvent(event, sizeof(uiohook_event));
+      HandleEvent(event, sizeof(uiohook_event));
       break;
   }
 }
@@ -190,7 +213,7 @@ int hook_enable() {
   #endif
     #if defined(_WIN32)
     // Attempt to set the thread priority to time critical.
-    if (SetThreadPriority(hook_thread, THREAD_PRIORITY_TIME_CRITICAL) == 0) {
+    if (SetThreadPriority(hook_thread, THREAD_PRIORITY_ABOVE_NORMAL) == 0) {
       logger_proc(LOG_LEVEL_WARN, "%s [%u]: Could not set thread priority %li for thread %#p! (%#lX)\n",
           __FUNCTION__, __LINE__, (long) THREAD_PRIORITY_TIME_CRITICAL,
           hook_thread, (unsigned long) GetLastError());
@@ -399,7 +422,11 @@ void stop() {
   #endif
 }
 
-Object IOHookHandler::FillEventObject(Env env, uiohook_event * event) {
+void IOHookEventJsCallback(Env env, Function callback, Context * context, DataType * event) {
+
+  // THIS IS NEVER REACHED ????
+  logger_proc(LOG_LEVEL_WARN, "%s [%u]: KEY EVENT CALLBACK\n", __FUNCTION__, __LINE__);
+
   Object obj = Object::New(env);
 
   obj.Set("type", Value::From(env, (uint16_t)event->type));
@@ -444,23 +471,10 @@ Object IOHookHandler::FillEventObject(Env env, uiohook_event * event) {
     obj.Set("wheel", wheel);
   }
 
-  return obj;
+  callback.Call({obj});
 }
 
-void IOHookHandler::KeyEventCallback(Env env, Function jsCallback, uiohook_event * event) {
-  Object obj = IOHookHandler::FillEventObject(env, event);
 
-  jsCallback.Call({obj});
-}
-
-void IOHookHandler::HandleEvent(const uiohook_event * event, size_t size)
-{
-
-  uiohook_event event_copy;
-  memcpy(&event_copy, event, sizeof(uiohook_event));
-
-  this->_onKeyEvent.NonBlockingCall(&event_copy, IOHookHandler::KeyEventCallback);
-}
 
 
 void Stop()
@@ -469,22 +483,18 @@ void Stop()
   sIsRunning = false;
 }
 
-IOHookHandler::IOHookHandler(const CallbackInfo& info) {
-  Function onKeyEvent = info[0].As<Function>();
-  this->_onKeyEvent = ThreadSafeFunction::New(info.Env(), onKeyEvent, "onKeyEvent Callback", 0, 1);
-} 
-
-
 Boolean DebugEnable(const CallbackInfo& info) {
   if (info.Length() > 0)
   {
-    sIsDebug = info[1].As<Boolean>();
+    sIsDebug = info[0].As<Boolean>();
   }
 
   return Boolean::New(info.Env(), true);
 }
 
 Boolean StartHook(const CallbackInfo& info) {
+  logger_proc(LOG_LEVEL_WARN, "%s [%u]: START HOOK\n", __FUNCTION__, __LINE__);
+
   //allow one single execution
   if (sIsRunning == false)
   {
@@ -496,8 +506,11 @@ Boolean StartHook(const CallbackInfo& info) {
 
       if (info[0].IsFunction())
       {
+        Function jsEventCb = info[0].As<Function>();
+        tsfnOnIOHookEvent = TSFN::New(jsEventCb.Env(), jsEventCb, "onKeyEvent Callback", 0, 2);
+
+        run();
         
-        sIOHook = new IOHookHandler(info);
         sIsRunning = true;
       }
     }
@@ -507,8 +520,10 @@ Boolean StartHook(const CallbackInfo& info) {
 }
 
 Boolean StopHook(const CallbackInfo& info) {
+  logger_proc(LOG_LEVEL_WARN, "%s [%u]: STOP HOOK\n", __FUNCTION__, __LINE__);
+
   //allow one single execution
-  if ((sIsRunning == true) && (sIOHook != nullptr))
+  if ((sIsRunning == true))
   {
     Stop();
   }
