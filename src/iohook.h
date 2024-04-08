@@ -1,24 +1,17 @@
 #pragma once
 
-#include <nan.h>
-
-#include <nan_object_wrap.h>
-
+#include <napi.h>
+#include <queue>
 #include "uiohook.h"
 
-class HookProcessWorker : public Nan::AsyncProgressQueueWorker<uiohook_event>
+class IOHookHandler
 {
+  private:
+    Napi::ThreadSafeFunction _onKeyEvent;
+    static Napi::Object FillEventObject(Napi::Env env, uiohook_event * event);
+
   public:
-  
-    typedef Nan::AsyncProgressQueueWorker<uiohook_event>::ExecutionProgress HookExecution;
-  
-    HookProcessWorker(Nan::Callback * callback);
-  
-    void Execute(const ExecutionProgress& progress);
-  
-    void HandleProgressCallback(const uiohook_event *event, size_t size);
-  
-    void Stop();
-  
-    const HookExecution* fHookExecution;
+    IOHookHandler(const Napi::CallbackInfo& info);
+    static void KeyEventCallback(Napi::Env env, Napi::Function jsCallback, uiohook_event * event);
+    void HandleEvent(const uiohook_event * event, size_t size);
 };

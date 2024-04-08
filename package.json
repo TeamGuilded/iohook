@@ -79,8 +79,8 @@
     "jest": "^26.6.3",
     "lint-staged": "^11.0.0",
     "minimist": "^1.2.5",
-    "nan": "^2.18.0",
     "node-abi": "^2.19.3",
+    "node-addon-api": "^3.1.0",
     "node-gyp": "^8.4.0",
     "prebuild": "^10.0.1",
     "prettier": "^2.3.1",
@@ -181,4 +181,3 @@
     ]
   ]
 }
-
