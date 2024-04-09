@@ -1,5 +1,6 @@
-#include "iohook.h"
+#include <napi.h>
 #include "uiohook.h"
+
 
 #ifdef _WIN32
 #include <windows.h>
@@ -10,38 +11,36 @@
 
 #include <pthread.h>
 #endif
+
+#include <thread>
+#include <condition_variable>
+#include <mutex>
 #include <queue>
+#include <chrono>
 
 using namespace Napi;
 
 static bool sIsRunning = false;
 static bool sIsDebug = false;
 
+static uiohook_event test_event;
+
+std::mutex g_event_queue;
+std::condition_variable cv_event_queue;
+static std::queue<uiohook_event> event_queue;
+
+std::thread event_thread;
+std::thread hook_thread;
+
 using Context = Reference<Napi::Value>;
 using DataType = uiohook_event;
-void IOHookEventJsCallback(Env env, Function callback, Context * context, DataType * event);
-using TSFN = TypedThreadSafeFunction<Context, DataType, IOHookEventJsCallback>;
+void CallJs(Env env, Function callback, Context * context, DataType * event);
+using TSFN = TypedThreadSafeFunction<Context, DataType, CallJs>;
 
 TSFN tsfnOnIOHookEvent;
 
-
 // Native thread errors.
 #define UIOHOOK_ERROR_THREAD_CREATE       0x10
-
-// Thread and mutex variables.
-#ifdef _WIN32
-static HANDLE hook_thread;
-
-static CRITICAL_SECTION hook_running_mutex;
-static CRITICAL_SECTION hook_control_mutex;
-static CONDITION_VARIABLE hook_control_cond;
-#else
-static pthread_t hook_thread;
-
-static pthread_mutex_t hook_running_mutex;
-static pthread_mutex_t hook_control_mutex;
-static pthread_cond_t hook_control_cond;
-#endif
 
 bool logger_proc(unsigned int level, const char *format, ...) {
   // if (!sIsDebug) {
@@ -69,20 +68,15 @@ bool logger_proc(unsigned int level, const char *format, ...) {
   return status;
 }
 
-void HandleEvent(const uiohook_event * event, size_t size)
+void handle_event(const uiohook_event * event, size_t size)
 {
-  logger_proc(LOG_LEVEL_WARN, "%s [%u]: HANDLE EVENT\n", __FUNCTION__, __LINE__);
+  logger_proc(LOG_LEVEL_WARN, "%s [%u]: HANDLE EVENT | TYPE: %u\n", __FUNCTION__, __LINE__, event->type);
 
   uiohook_event event_copy;
   memcpy(&event_copy, event, sizeof(uiohook_event));
-
-  napi_status status = tsfnOnIOHookEvent.NonBlockingCall(&event_copy);
-
-  if (status != napi_ok) {
-    logger_proc(LOG_LEVEL_WARN, "%s [%u]: EVENT ERROR %u\n", __FUNCTION__, __LINE__, status);
-  }
-
-  logger_proc(LOG_LEVEL_WARN, "%s [%u]: DONE HANDLE EVENT %u\n", __FUNCTION__, __LINE__, status);
+  std::lock_guard<std::mutex> lock(g_event_queue);
+  event_queue.push(event_copy);
+  cv_event_queue.notify_one();
 }
 
 // NOTE: The following callback executes on the same thread that hook_run() is called
@@ -94,43 +88,9 @@ void HandleEvent(const uiohook_event * event, size_t size)
 void dispatch_proc(uiohook_event * const event) {
   switch (event->type) {
     case EVENT_HOOK_ENABLED:
-      // Lock the running mutex so we know if the hook is enabled.
-      #ifdef _WIN32
-      EnterCriticalSection(&hook_running_mutex);
-      #else
-      pthread_mutex_lock(&hook_running_mutex);
-      #endif
-
-      // Unlock the control mutex so hook_enable() can continue.
-      #ifdef _WIN32
-      WakeConditionVariable(&hook_control_cond);
-      LeaveCriticalSection(&hook_control_mutex);
-      #else
-      // Unlock the control mutex so hook_enable() can continue.
-      pthread_cond_signal(&hook_control_cond);
-      pthread_mutex_unlock(&hook_control_mutex);
-      #endif
       break;
 
     case EVENT_HOOK_DISABLED:
-      // Lock the control mutex until we exit.
-      #ifdef _WIN32
-      EnterCriticalSection(&hook_control_mutex);
-      #else
-      pthread_mutex_lock(&hook_control_mutex);
-      #endif
-
-      // Unlock the running mutex so we know if the hook is disabled.
-      #ifdef _WIN32
-      LeaveCriticalSection(&hook_running_mutex);
-      #else
-      #if defined(__APPLE__) && defined(__MACH__)
-      // Stop the main runloop so that this program ends.
-      CFRunLoopStop(CFRunLoopGetMain());
-      #endif
-
-      pthread_mutex_unlock(&hook_running_mutex);
-      #endif
       break;
 
     case EVENT_KEY_PRESSED:
@@ -142,166 +102,134 @@ void dispatch_proc(uiohook_event * const event) {
     case EVENT_MOUSE_MOVED:
     case EVENT_MOUSE_DRAGGED:
     case EVENT_MOUSE_WHEEL:
-      HandleEvent(event, sizeof(uiohook_event));
+      handle_event(event, sizeof(uiohook_event));
       break;
   }
 }
 
-#ifdef _WIN32
-DWORD WINAPI hook_thread_proc(LPVOID arg) {
-#else
-void *hook_thread_proc(void *arg) {
-#endif
-  // Set the hook status.
+void hook_thread_proc() {
+  logger_proc(LOG_LEVEL_WARN, "%s [%u]: RUNNING UIOHOOK THREAD\n", __FUNCTION__, __LINE__);
+
   int status = hook_run();
   if (status != UIOHOOK_SUCCESS) {
-    #ifdef _WIN32
-    *(DWORD *) arg = status;
-    #else
-    *(int *) arg = status;
-    #endif
+     logger_proc(LOG_LEVEL_DEBUG,  "%s [%u]: FAILED TO HOOK: (%#X).\n",
+        __FUNCTION__, __LINE__, status);
+   }
+}
+
+void process_events_proc() {
+  tsfnOnIOHookEvent.Acquire();
+
+  uiohook_event ev;
+
+  while (sIsRunning) {
+    std::unique_lock<std::mutex> lock(g_event_queue);
+
+    cv_event_queue.wait(lock, []{return !event_queue.empty();});
+
+    ev = event_queue.front();
+
+    logger_proc(LOG_LEVEL_WARN, "%s [%u]: GOT QUEUED EVENT\n", __FUNCTION__, __LINE__);
+
+    napi_status status = tsfnOnIOHookEvent.NonBlockingCall(&ev);
+
+    if (status != napi_ok) {
+      logger_proc(LOG_LEVEL_WARN, "%s [%u]: EVENT ERROR %u\n", __FUNCTION__, __LINE__, status);
+    }
+
+    event_queue.pop();
   }
 
-  // Make sure we signal that we have passed any exception throwing code for
-  // the waiting hook_enable().
-  #ifdef _WIN32
-  WakeConditionVariable(&hook_control_cond);
-  LeaveCriticalSection(&hook_control_mutex);
-
-  return status;
-  #else
-  // Make sure we signal that we have passed any exception throwing code for
-  // the waiting hook_enable().
-  pthread_cond_signal(&hook_control_cond);
-  pthread_mutex_unlock(&hook_control_mutex);
-
-  return arg;
-  #endif
+  tsfnOnIOHookEvent.Release();
 }
 
 int hook_enable() {
-  // Lock the thread control mutex.  This will be unlocked when the
-  // thread has finished starting, or when it has fully stopped.
-  #ifdef _WIN32
-  EnterCriticalSection(&hook_control_mutex);
-  #else
-  pthread_mutex_lock(&hook_control_mutex);
-  #endif
-
   // Set the initial status.
   int status = UIOHOOK_FAILURE;
 
-  #ifndef _WIN32
-  // Create the thread attribute.
-  pthread_attr_t hook_thread_attr;
-  pthread_attr_init(&hook_thread_attr);
+  hook_thread = std::thread(hook_thread_proc);
+  event_thread = std::thread(process_events_proc);
 
-  // Get the policy and priority for the thread attr.
-  int policy;
-  pthread_attr_getschedpolicy(&hook_thread_attr, &policy);
-  int priority = sched_get_priority_max(policy);
-  #endif
+  status = UIOHOOK_SUCCESS;
 
-  #if defined(_WIN32)
-  DWORD hook_thread_id;
-  DWORD *hook_thread_status = (DWORD *) malloc(sizeof(DWORD));
-  hook_thread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE) hook_thread_proc, hook_thread_status, 0, &hook_thread_id);
-  if (hook_thread != INVALID_HANDLE_VALUE) {
-  #else
-  int *hook_thread_status = (int*)malloc(sizeof(int));
-  if (pthread_create(&hook_thread, &hook_thread_attr, hook_thread_proc, hook_thread_status) == 0) {
-  #endif
-    #if defined(_WIN32)
-    // Attempt to set the thread priority to time critical.
-    if (SetThreadPriority(hook_thread, THREAD_PRIORITY_ABOVE_NORMAL) == 0) {
-      logger_proc(LOG_LEVEL_WARN, "%s [%u]: Could not set thread priority %li for thread %#p! (%#lX)\n",
-          __FUNCTION__, __LINE__, (long) THREAD_PRIORITY_TIME_CRITICAL,
-          hook_thread, (unsigned long) GetLastError());
-    }
-    #elif (defined(__APPLE__) && defined(__MACH__)) || _POSIX_C_SOURCE >= 200112L
-    // Some POSIX revisions do not support pthread_setschedprio so we will
-    // use pthread_setschedparam instead.
-    struct sched_param param = { .sched_priority = priority };
-    if (pthread_setschedparam(hook_thread, SCHED_OTHER, &param) != 0) {
-      logger_proc(LOG_LEVEL_WARN, "%s [%u]: Could not set thread priority %i for thread 0x%lX!\n",
-          __FUNCTION__, __LINE__, priority, (unsigned long) hook_thread);
-    }
-    #else
-    // Raise the thread priority using glibc pthread_setschedprio.
-    if (pthread_setschedprio(hook_thread, priority) != 0) {
-      logger_proc(LOG_LEVEL_WARN, "%s [%u]: Could not set thread priority %i for thread 0x%lX!\n",
-          __FUNCTION__, __LINE__, priority, (unsigned long) hook_thread);
-    }
-    #endif
-
-
-    // Wait for the thread to indicate that it has passed the
-    // initialization portion by blocking until either a EVENT_HOOK_ENABLED
-    // event is received or the thread terminates.
-    // NOTE This unlocks the hook_control_mutex while we wait.
-    #ifdef _WIN32
-    SleepConditionVariableCS(&hook_control_cond, &hook_control_mutex, INFINITE);
-    #else
-    pthread_cond_wait(&hook_control_cond, &hook_control_mutex);
-    #endif
-
-    #ifdef _WIN32
-    if (TryEnterCriticalSection(&hook_running_mutex) != FALSE) {
-    #else
-    if (pthread_mutex_trylock(&hook_running_mutex) == 0) {
-    #endif
-      // Lock Successful; The hook is not running but the hook_control_cond
-      // was signaled!  This indicates that there was a startup problem!
-
-      // Get the status back from the thread.
-      #ifdef _WIN32
-      WaitForSingleObject(hook_thread,  INFINITE);
-      GetExitCodeThread(hook_thread, hook_thread_status);
-      #else
-      pthread_join(hook_thread, (void **) &hook_thread_status);
-      status = *hook_thread_status;
-      #endif
-    }
-    else {
-      // Lock Failure; The hook is currently running and wait was signaled
-      // indicating that we have passed all possible start checks.  We can
-      // always assume a successful startup at this point.
-      status = UIOHOOK_SUCCESS;
-    }
-
-    free(hook_thread_status);
-
-    logger_proc(LOG_LEVEL_DEBUG,  "%s [%u]: Thread Result: (%#X).\n",
-        __FUNCTION__, __LINE__, status);
-  }
-  else {
-    status = UIOHOOK_ERROR_THREAD_CREATE;
-  }
-
-  // Make sure the control mutex is unlocked.
-  #ifdef _WIN32
-  LeaveCriticalSection(&hook_control_mutex);
-  #else
-  pthread_mutex_unlock(&hook_control_mutex);
-  #endif
+  logger_proc(LOG_LEVEL_DEBUG,  "%s [%u]: Thread Result: (%#X). EVENT_THREAD_ID = %u | HOOK_THREAD_ID = %u | MAIN THREAD = %u\n",
+        __FUNCTION__, __LINE__, status, event_thread.get_id(), hook_thread.get_id(), std::this_thread::get_id());
 
   return status;
 }
 
-void run() {
-  // Lock the thread control mutex.  This will be unlocked when the
-  // thread has finished starting, or when it has fully stopped.
-  #ifdef _WIN32
-  // Create event handles for the thread hook.
-  InitializeCriticalSection(&hook_running_mutex);
-  InitializeCriticalSection(&hook_control_mutex);
-  InitializeConditionVariable(&hook_control_cond);
-  #else
-  pthread_mutex_init(&hook_running_mutex, NULL);
-  pthread_mutex_init(&hook_control_mutex, NULL);
-  pthread_cond_init(&hook_control_cond, NULL);
-  #endif
+void stop() {
+  int status = hook_stop();
+  switch (status) {
+    // System level errors.
+    case UIOHOOK_ERROR_OUT_OF_MEMORY:
+      logger_proc(LOG_LEVEL_ERROR, "Failed to allocate memory. (%#X)", status);
+      break;
 
+    case UIOHOOK_ERROR_X_RECORD_GET_CONTEXT:
+      // NOTE This is the only platform specific error that occurs on hook_stop().
+      logger_proc(LOG_LEVEL_ERROR, "Failed to get XRecord context. (%#X)", status);
+      break;
+
+    // Default error.
+    case UIOHOOK_FAILURE:
+    default:
+      logger_proc(LOG_LEVEL_ERROR, "An unknown hook error occurred. (%#X)", status);
+      break;
+  }
+}
+
+void CallJs(Env env, Function callback, Context * context, DataType * event) {
+  logger_proc(LOG_LEVEL_WARN, "%s [%u]: EVENT CALLBACK. TYPE: %u\n", __FUNCTION__, __LINE__, event->type);
+
+  Object obj = Object::New(env);
+
+  obj.Set("type", Value::From(env, (uint16_t)event->type));
+  obj.Set("mask", Value::From(env, (uint16_t)event->mask));
+  obj.Set("time", Value::From(env, (uint16_t)event->time));
+
+  if ((event->type >= EVENT_KEY_TYPED) && (event->type <= EVENT_KEY_RELEASED)) {
+    Object keyboard = Object::New(env);
+
+    keyboard.Set("shiftKey", event->data.keyboard.keycode == VC_SHIFT_L || event->data.keyboard.keycode == VC_SHIFT_R);
+    keyboard.Set("altKey", event->data.keyboard.keycode == VC_ALT_L || event->data.keyboard.keycode == VC_ALT_R);
+    keyboard.Set("ctrlKey", event->data.keyboard.keycode == VC_CONTROL_L || event->data.keyboard.keycode == VC_CONTROL_R);
+    keyboard.Set("metaKey", event->data.keyboard.keycode == VC_META_L || event->data.keyboard.keycode == VC_META_R);
+
+
+    if (event->type == EVENT_KEY_TYPED) {
+      keyboard.Set("keychar", Value::From(env, (uint16_t)event->data.keyboard.keychar));
+    }
+
+    keyboard.Set("keycode", Value::From(env, (uint16_t)event->data.keyboard.keycode));
+    keyboard.Set("rawcode", Value::From(env, (uint16_t)event->data.keyboard.rawcode));
+
+    obj.Set("keyboard", keyboard);
+  } else if ((event->type >= EVENT_MOUSE_CLICKED) && (event->type < EVENT_MOUSE_WHEEL)) {
+    Object mouse = Object::New(env);
+    mouse.Set("button", Value::From(env, (uint16_t)event->data.mouse.button));
+    mouse.Set("clicks", Value::From(env, (uint16_t)event->data.mouse.clicks));
+    mouse.Set("x", Value::From(env, (int16_t)event->data.mouse.x));
+    mouse.Set("y", Value::From(env, (int16_t)event->data.mouse.y));
+
+    obj.Set("mouse", mouse);
+  } else if (event->type == EVENT_MOUSE_WHEEL) {
+    Object wheel = Object::New(env);
+    wheel.Set("amount", Value::From(env, (uint16_t)event->data.wheel.amount));
+    wheel.Set("clicks", Value::From(env, (uint16_t)event->data.wheel.clicks));
+    wheel.Set("direction", Value::From(env, (int16_t)event->data.wheel.direction));
+    wheel.Set("rotation", Value::From(env, (int16_t)event->data.wheel.rotation));
+    wheel.Set("type", Value::From(env, (int16_t)event->data.wheel.type));
+    wheel.Set("x", Value::From(env, (int16_t)event->data.wheel.x));
+    wheel.Set("y", Value::From(env, (int16_t)event->data.wheel.y));
+
+    obj.Set("wheel", wheel);
+  }
+
+  callback.Call({obj});
+}
+
+void run() {
   // Set the logger callback for library output.
   hook_set_logger_proc(&logger_proc);
 
@@ -310,20 +238,11 @@ void run() {
 
   // Start the hook and block.
   // NOTE If EVENT_HOOK_ENABLED was delivered, the status will always succeed.
+  logger_proc(LOG_LEVEL_ERROR, "STARTING HOOK ENABLE\n");
   int status = hook_enable();
+  logger_proc(LOG_LEVEL_ERROR, "DONE HOOK ENABLE\n");
   switch (status) {
     case UIOHOOK_SUCCESS:
-      // We no longer block, so we need to explicitly wait for the thread to die.
-      #ifdef _WIN32
-      WaitForSingleObject(hook_thread,  INFINITE);
-      #else
-      #if defined(__APPLE__) && defined(__MACH__)
-      // NOTE Darwin requires that you start your own runloop from main.
-      CFRunLoopRun();
-      #endif
-
-      pthread_join(hook_thread, NULL);
-      #endif
       break;
 
     // System level errors.
@@ -389,94 +308,6 @@ void run() {
   }
 }
 
-void stop() {
-  int status = hook_stop();
-  switch (status) {
-    // System level errors.
-    case UIOHOOK_ERROR_OUT_OF_MEMORY:
-      logger_proc(LOG_LEVEL_ERROR, "Failed to allocate memory. (%#X)", status);
-      break;
-
-    case UIOHOOK_ERROR_X_RECORD_GET_CONTEXT:
-      // NOTE This is the only platform specific error that occurs on hook_stop().
-      logger_proc(LOG_LEVEL_ERROR, "Failed to get XRecord context. (%#X)", status);
-      break;
-
-    // Default error.
-    case UIOHOOK_FAILURE:
-    default:
-      logger_proc(LOG_LEVEL_ERROR, "An unknown hook error occurred. (%#X)", status);
-      break;
-  }
-
-  #ifdef _WIN32
-  // wait for hook thread clean exit
-  WaitForSingleObject(hook_thread, INFINITE);
-  CloseHandle(hook_thread);
-  DeleteCriticalSection(&hook_running_mutex);
-  DeleteCriticalSection(&hook_control_mutex);
-  #else
-  pthread_mutex_destroy(&hook_running_mutex);
-  pthread_mutex_destroy(&hook_control_mutex);
-  pthread_cond_destroy(&hook_control_cond);
-  #endif
-}
-
-void IOHookEventJsCallback(Env env, Function callback, Context * context, DataType * event) {
-
-  // THIS IS NEVER REACHED ????
-  logger_proc(LOG_LEVEL_WARN, "%s [%u]: KEY EVENT CALLBACK\n", __FUNCTION__, __LINE__);
-
-  Object obj = Object::New(env);
-
-  obj.Set("type", Value::From(env, (uint16_t)event->type));
-  obj.Set("mask", Value::From(env, (uint16_t)event->mask));
-  obj.Set("time", Value::From(env, (uint16_t)event->time));
-
-  if ((event->type >= EVENT_KEY_TYPED) && (event->type <= EVENT_KEY_RELEASED)) {
-    Object keyboard = Object::New(env);
-
-    keyboard.Set("shiftKey", event->data.keyboard.keycode == VC_SHIFT_L || event->data.keyboard.keycode == VC_SHIFT_R);
-    keyboard.Set("altKey", event->data.keyboard.keycode == VC_ALT_L || event->data.keyboard.keycode == VC_ALT_R);
-    keyboard.Set("ctrlKey", event->data.keyboard.keycode == VC_CONTROL_L || event->data.keyboard.keycode == VC_CONTROL_R);
-    keyboard.Set("metaKey", event->data.keyboard.keycode == VC_META_L || event->data.keyboard.keycode == VC_META_R);
-
-
-    if (event->type == EVENT_KEY_TYPED) {
-      keyboard.Set("keychar", Value::From(env, (uint16_t)event->data.keyboard.keychar));
-    }
-
-    keyboard.Set("keycode", Value::From(env, (uint16_t)event->data.keyboard.keycode));
-    keyboard.Set("rawcode", Value::From(env, (uint16_t)event->data.keyboard.rawcode));
-
-    obj.Set("keyboard", keyboard);
-  } else if ((event->type >= EVENT_MOUSE_CLICKED) && (event->type < EVENT_MOUSE_WHEEL)) {
-    Object mouse = Object::New(env);
-    mouse.Set("button", Value::From(env, (uint16_t)event->data.mouse.button));
-    mouse.Set("clicks", Value::From(env, (uint16_t)event->data.mouse.clicks));
-    mouse.Set("x", Value::From(env, (int16_t)event->data.mouse.x));
-    mouse.Set("y", Value::From(env, (int16_t)event->data.mouse.y));
-
-    obj.Set("mouse", mouse);
-  } else if (event->type == EVENT_MOUSE_WHEEL) {
-    Object wheel = Object::New(env);
-    wheel.Set("amount", Value::From(env, (uint16_t)event->data.wheel.amount));
-    wheel.Set("clicks", Value::From(env, (uint16_t)event->data.wheel.clicks));
-    wheel.Set("direction", Value::From(env, (int16_t)event->data.wheel.direction));
-    wheel.Set("rotation", Value::From(env, (int16_t)event->data.wheel.rotation));
-    wheel.Set("type", Value::From(env, (int16_t)event->data.wheel.type));
-    wheel.Set("x", Value::From(env, (int16_t)event->data.wheel.x));
-    wheel.Set("y", Value::From(env, (int16_t)event->data.wheel.y));
-
-    obj.Set("wheel", wheel);
-  }
-
-  callback.Call({obj});
-}
-
-
-
-
 void Stop()
 {
   stop();
@@ -506,12 +337,9 @@ Boolean StartHook(const CallbackInfo& info) {
 
       if (info[0].IsFunction())
       {
-        Function jsEventCb = info[0].As<Function>();
-        tsfnOnIOHookEvent = TSFN::New(jsEventCb.Env(), jsEventCb, "onKeyEvent Callback", 0, 2);
-
-        run();
-        
+        tsfnOnIOHookEvent = TSFN::New(info.Env(), info[0].As<Function>(), "onKeyEvent Callback", 0, 1);
         sIsRunning = true;
+        run();
       }
     }
   }

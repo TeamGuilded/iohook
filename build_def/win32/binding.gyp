@@ -4,8 +4,7 @@
 		"win_delay_load_hook": "true",
 		"type": "loadable_module",
 		"sources": [
-			"src/iohook.cc",
-			"src/iohook.h"
+			"src/iohook.cc"
 		],
 		"dependencies": [
 			"./uiohook.gyp:uiohook"
