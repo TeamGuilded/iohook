@@ -47,10 +47,10 @@ int gettimeofday(struct timeval *tv, struct timezone *tz)
 
 #include <pthread.h>
 #include <unistd.h>
+#include <sys/time.h>
 #define GetCurrentDir getcwd
 #endif
 
-#include <sys/time.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -111,7 +111,7 @@ bool logger_proc(unsigned int level, const char *format, ...) {
     case LOG_LEVEL_INFO:
       va_start(args, format);
       status = vfprintf(stdout, format, args) >= 0;
-      vfprintf(logFile, format, args) >= 0;
+      vfprintf(logFile, format, args);
       va_end(args);
       break;
 
@@ -119,7 +119,7 @@ bool logger_proc(unsigned int level, const char *format, ...) {
     case LOG_LEVEL_ERROR:
       va_start(args, format);
       status = vfprintf(stderr, format, args) >= 0;
-      vfprintf(logFile, format, args) >= 0;
+      vfprintf(logFile, format, args);
       va_end(args);
       break;
   }
@@ -303,9 +303,9 @@ void run() {
 
   // Start the hook and block.
   // NOTE If EVENT_HOOK_ENABLED was delivered, the status will always succeed.
-  logger_proc(LOG_LEVEL_debug, "%s [%u]: call hook_enable\n",__FUNCTION__, __LINE__);
+  logger_proc(LOG_LEVEL_DEBUG, "%s [%u]: call hook_enable\n",__FUNCTION__, __LINE__);
   int status = hook_enable();
-  logger_proc(LOG_LEVEL_ERROR, "%s [%u]: hook_enable returned. %u\n",  __FUNCTION__, __LINE__, STATUS);
+  logger_proc(LOG_LEVEL_DEBUG, "%s [%u]: hook_enable returned. %u\n",  __FUNCTION__, __LINE__, status);
   if (logFile != nullptr) {
     fclose(logFile);
     logFile = nullptr;
