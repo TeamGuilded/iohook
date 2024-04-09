@@ -195,20 +195,30 @@ void process_events_proc() {
   while (sIsRunning) {
     std::unique_lock<std::mutex> lock(g_event_queue);
 
-    cv_event_queue.wait(lock, []{return !event_queue.empty();});
+    // cv_event_queue.wait(lock, []{return !event_queue.empty();});
 
-    ev = event_queue.front();
+    napi_status status;
 
-    logger_proc(LOG_LEVEL_WARN, "%s [%u]: received event from queue | type: %u | keycode:  %#X\n", 
-      __FUNCTION__, __LINE__, ev.type, ev.data.keyboard.keycode);
+    if (event_queue.empty()) {
+      // pump empty message - will be ignored on JS side
+      ev.type = EVENT_HOOK_ENABLED;
+      status = tsfnOnIOHookEvent.NonBlockingCall(&ev);
+    } else {
+      ev = event_queue.front();
 
-    napi_status status = tsfnOnIOHookEvent.NonBlockingCall(&ev);
+      logger_proc(LOG_LEVEL_WARN, "%s [%u]: received event from queue | type: %u | keycode:  %#X\n", 
+        __FUNCTION__, __LINE__, ev.type, ev.data.keyboard.keycode);
 
-    if (status != napi_ok) {
-      logger_proc(LOG_LEVEL_WARN, "%s [%u]: TSFN callback error: %u\n", __FUNCTION__, __LINE__, status);
+      status = tsfnOnIOHookEvent.NonBlockingCall(&ev);
+
+      if (status != napi_ok) {
+        logger_proc(LOG_LEVEL_WARN, "%s [%u]: TSFN callback error: %u\n", __FUNCTION__, __LINE__, status);
+      }
+
+      event_queue.pop();
     }
 
-    event_queue.pop();
+    std::this_thread::sleep_for(chrono::microseconds(10))
   }
 
   tsfnOnIOHookEvent.Release();
