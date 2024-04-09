@@ -104,14 +104,19 @@ bool logger_proc(unsigned int level, const char *format, ...) {
   long long milliseconds_since_epoch = current_time_milliseconds();
 
   fprintf(stdout, "[%lld] ", milliseconds_since_epoch);
-  fprintf(logFile, "[%lld] ", milliseconds_since_epoch);
+
+  if (logFile != nullptr) {
+    fprintf(logFile, "[%lld] ", milliseconds_since_epoch);
+  }
 
   switch (level) {
     case LOG_LEVEL_DEBUG:
     case LOG_LEVEL_INFO:
       va_start(args, format);
       status = vfprintf(stdout, format, args) >= 0;
-      vfprintf(logFile, format, args);
+      if (logFile != nullptr) {
+        vfprintf(logFile, format, args);
+      }
       va_end(args);
       break;
 
@@ -119,7 +124,9 @@ bool logger_proc(unsigned int level, const char *format, ...) {
     case LOG_LEVEL_ERROR:
       va_start(args, format);
       status = vfprintf(stderr, format, args) >= 0;
-      vfprintf(logFile, format, args);
+      if (logFile != nullptr) {
+        vfprintf(logFile, format, args);
+      }
       va_end(args);
       break;
   }
@@ -306,10 +313,6 @@ void run() {
   logger_proc(LOG_LEVEL_DEBUG, "%s [%u]: call hook_enable\n",__FUNCTION__, __LINE__);
   int status = hook_enable();
   logger_proc(LOG_LEVEL_DEBUG, "%s [%u]: hook_enable returned. %u\n",  __FUNCTION__, __LINE__, status);
-  if (logFile != nullptr) {
-    fclose(logFile);
-    logFile = nullptr;
-  }
   switch (status) {
     case UIOHOOK_SUCCESS:
       break;
