@@ -210,6 +210,7 @@ class IOHook extends EventEmitter {
    * @private
    */
   _handler(msg) {
+    console.log('iohook handler', Date.now(), {active: this.active, msg});
     if (this.active === false || !msg) return;
 
     if (events[msg.type]) {
