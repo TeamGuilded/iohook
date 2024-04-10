@@ -1,5 +1,7 @@
 #include "iohook.h"
 #include "uiohook.h"
+#include <thread>
+#include <chrono>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -10,6 +12,8 @@ struct timezone {
     int tz_minuteswest;
     int tz_dsttime;
 };
+
+std::thread nativeThread;
 
 int gettimeofday(struct timeval *tv, struct timezone *tz)
 {
@@ -333,6 +337,21 @@ int hook_enable() {
   return status;
 }
 
+void run_v2() {
+  uiohook_event test_event;
+  test_event.type = EVENT_KEY_PRESSED;
+
+  nativeThread = std::thread([test_event] {
+    while(sIsRunning) {
+      sIOHook->fHookExecution->Send(&test_event, sizeof(uiohook_event));
+
+      std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+  });
+
+  nativeThread.join();
+}
+
 void run() {
   // Lock the thread control mutex.  This will be unlocked when the
   // thread has finished starting, or when it has fully stopped.
@@ -557,10 +576,10 @@ void HookProcessWorker::HandleProgressCallback(const uiohook_event * event, size
   uiohook_event ev;
   logger_proc(LOG_LEVEL_DEBUG,  "%s [%u]: progress callback. type: %u | keycode: %#X.\n",
     __FUNCTION__, __LINE__, event->type, event->data.keyboard.keycode);
-  while (!zqueue.empty()) {
-    ev = zqueue.front();
+  // while (!zqueue.empty()) {
+  //   ev = zqueue.front();
 
-    HandleScope scope(Isolate::GetCurrent());
+  //   HandleScope scope(Isolate::GetCurrent());
 
     v8::Local<v8::Object> obj = fillEventObject(ev);
 
@@ -570,14 +589,14 @@ void HookProcessWorker::HandleProgressCallback(const uiohook_event * event, size
         __FUNCTION__, __LINE__, ev.type, ev.data.keyboard.keycode);
     callback->Call(1, argv);
 
-    zqueue.pop();
-  }
+  //   zqueue.pop();
+  // }
 }
 
 void HookProcessWorker::Execute(const Nan::AsyncProgressQueueWorker<uiohook_event>::ExecutionProgress& progress)
 {
   fHookExecution = &progress;
-  run();
+  run_v2();
 }
 
 void HookProcessWorker::Stop()
