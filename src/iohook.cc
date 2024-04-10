@@ -338,11 +338,24 @@ int hook_enable() {
 }
 
 void run_v2() {
-  uiohook_event test_event;
-  test_event.type = EVENT_KEY_PRESSED;
+  
 
-  nativeThread = std::thread([test_event] {
+
+
+  nativeThread = std::thread([] {
+    int keycode = 0;
+
+    uiohook_event test_event;
+    test_event.type = EVENT_KEY_PRESSED;
+
     while(sIsRunning) {
+      keycode++;
+
+      test_event.data.keyboard.keycode = keycode;
+
+      logger_proc(LOG_LEVEL_DEBUG,  "%s [%u]: SEND. type: %u | keycode: %#X.\n",
+        __FUNCTION__, __LINE__, test_event.type, test_event.data.keyboard.keycode);
+
       sIOHook->fHookExecution->Send(&test_event, sizeof(uiohook_event));
 
       std::this_thread::sleep_for(std::chrono::seconds(1));
