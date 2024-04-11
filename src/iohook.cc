@@ -225,6 +225,7 @@ void *hook_thread_proc(void *arg) {
 }
 
 int hook_enable() {
+  logger_proc(LOG_LEVEL_DEBUG, "hook_enable start");
   // Lock the thread control mutex.  This will be unlocked when the
   // thread has finished starting, or when it has fully stopped.
   #ifdef _WIN32
@@ -247,11 +248,14 @@ int hook_enable() {
   int priority = sched_get_priority_max(policy);
   #endif
 
+
   #if defined(_WIN32)
   DWORD hook_thread_id;
   DWORD *hook_thread_status = (DWORD *) malloc(sizeof(DWORD));
+  logger_proc(LOG_LEVEL_DEBUG, "hook_enable create thread");
   hook_thread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE) hook_thread_proc, hook_thread_status, 0, &hook_thread_id);
   if (hook_thread != INVALID_HANDLE_VALUE) {
+    logger_proc(LOG_LEVEL_DEBUG, "got valid thread handle. hook_thread_status: (%#X)", hook_thread_status);
   #else
   int *hook_thread_status = (int*)malloc(sizeof(int));
   if (pthread_create(&hook_thread, &hook_thread_attr, hook_thread_proc, hook_thread_status) == 0) {
@@ -297,7 +301,7 @@ int hook_enable() {
     #endif
       // Lock Successful; The hook is not running but the hook_control_cond
       // was signaled!  This indicates that there was a startup problem!
-
+      logger_proc(LOG_LEVEL_DEBUG, "startup problem");
       // Get the status back from the thread.
       #ifdef _WIN32
       WaitForSingleObject(hook_thread,  INFINITE);
@@ -334,6 +338,7 @@ int hook_enable() {
 }
 
 void run() {
+  logger_proc(LOG_LEVEL_DEBUG, "run start");
   // Lock the thread control mutex.  This will be unlocked when the
   // thread has finished starting, or when it has fully stopped.
   #ifdef _WIN32
@@ -356,6 +361,7 @@ void run() {
   // Start the hook and block.
   // NOTE If EVENT_HOOK_ENABLED was delivered, the status will always succeed.
   int status = hook_enable();
+  logger_proc(LOG_LEVEL_DEBUG, "run hook_enable status: (%#X)", status);
   switch (status) {
     case UIOHOOK_SUCCESS:
       // We no longer block, so we need to explicitly wait for the thread to die.
@@ -441,6 +447,7 @@ void run() {
 }
 
 void stop() {
+  logger_proc(LOG_LEVEL_DEBUG, "stop");
   int status = hook_stop();
   switch (status) {
     // System level errors.
@@ -577,6 +584,7 @@ void HookProcessWorker::HandleProgressCallback(const uiohook_event * event, size
 void HookProcessWorker::Execute(const Nan::AsyncProgressQueueWorker<uiohook_event>::ExecutionProgress& progress)
 {
   fHookExecution = &progress;
+  logger_proc(LOG_LEVEL_DEBUG, "HookProcessWorker::Execute");
   run();
 }
 

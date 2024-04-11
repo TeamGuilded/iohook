@@ -219,16 +219,14 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpReserved) {
 			// Save the DLL address.
 			hInst = hInstDLL;
 
-			// Initialize native input helper functions.
-			load_input_helper();
+
 			break;
 
 		case DLL_PROCESS_DETACH:
 			// Unregister any hooks that may still be installed.
 			unregister_running_hooks();
 
-			// Deinitialize native input helper functions.
-			unload_input_helper();
+
 			break;
 
 		case DLL_THREAD_ATTACH:
