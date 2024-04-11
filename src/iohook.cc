@@ -59,7 +59,7 @@ int gettimeofday(struct timeval *tv, struct timezone *tz)
 using namespace v8;
 using Callback = Nan::Callback;
 static bool sIsRunning = false;
-static bool sIsDebug = false;
+static bool sIsDebug = true;
 
 FILE * logFile = nullptr;
 
@@ -435,7 +435,7 @@ void run() {
     // Default error.
     case UIOHOOK_FAILURE:
     default:
-      logger_proc(LOG_LEVEL_ERROR, "An unknown hook error occurred. (%#X)\n", status);
+      logger_proc(LOG_LEVEL_ERROR, "An unknown hook error occurred ON ENABLE. (%#X)\n", status);
       break;
   }
 }
@@ -456,7 +456,7 @@ void stop() {
     // Default error.
     case UIOHOOK_FAILURE:
     default:
-      logger_proc(LOG_LEVEL_ERROR, "An unknown hook error occurred. (%#X)", status);
+      logger_proc(LOG_LEVEL_ERROR, "An unknown hook error occurred ON STOP. (%#X)", status);
       break;
   }
 
