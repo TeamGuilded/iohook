@@ -156,7 +156,7 @@ class IOHook extends EventEmitter {
    * Load native module
    */
   load() {
-    NodeHookAddon.startHook(this._handler.bind(this), this.debug || false);
+    NodeHookAddon.startHook(this._handler.bind(this), this.debug || true);
   }
 
   /**
