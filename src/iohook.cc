@@ -338,9 +338,6 @@ int hook_enable() {
 }
 
 void run_v2() {
-  
-
-
 
   nativeThread = std::thread([] {
     int keycode = 0;
@@ -348,10 +345,16 @@ void run_v2() {
     uiohook_event test_event;
     test_event.type = EVENT_KEY_PRESSED;
 
-    while(sIsRunning) {
+    std::this_thread::sleep_for(std::chrono::seconds(3));
+
+    while(true) {
       keycode++;
 
       test_event.data.keyboard.keycode = keycode;
+
+      uiohook_event event_copy;
+      memcpy(&event_copy, &test_event, sizeof(uiohook_event));
+      zqueue.push(event_copy);
 
       logger_proc(LOG_LEVEL_DEBUG,  "%s [%u]: SEND. type: %u | keycode: %#X.\n",
         __FUNCTION__, __LINE__, test_event.type, test_event.data.keyboard.keycode);
@@ -363,6 +366,12 @@ void run_v2() {
   });
 
   nativeThread.join();
+
+  if (logFile != nullptr) {
+    fclose(logFile);
+    logFile = nullptr;
+  }
+
 }
 
 void run() {
@@ -402,10 +411,10 @@ void run() {
       pthread_join(hook_thread, NULL);
       #endif
 
-      if (logFile != nullptr) {
-        fclose(logFile);
-        logFile = nullptr;
-      }
+      // if (logFile != nullptr) {
+      //   fclose(logFile);
+      //   logFile = nullptr;
+      // }
 
       break;
 
@@ -586,13 +595,14 @@ v8::Local<v8::Object> fillEventObject(uiohook_event event) {
 
 void HookProcessWorker::HandleProgressCallback(const uiohook_event * event, size_t size)
 {
+
   uiohook_event ev;
   logger_proc(LOG_LEVEL_DEBUG,  "%s [%u]: progress callback. type: %u | keycode: %#X.\n",
     __FUNCTION__, __LINE__, event->type, event->data.keyboard.keycode);
-  // while (!zqueue.empty()) {
-  //   ev = zqueue.front();
+  while (!zqueue.empty()) {
+    ev = zqueue.front();
 
-  //   HandleScope scope(Isolate::GetCurrent());
+    HandleScope scope(Isolate::GetCurrent());
 
     v8::Local<v8::Object> obj = fillEventObject(ev);
 
@@ -602,8 +612,8 @@ void HookProcessWorker::HandleProgressCallback(const uiohook_event * event, size
         __FUNCTION__, __LINE__, ev.type, ev.data.keyboard.keycode);
     callback->Call(1, argv);
 
-  //   zqueue.pop();
-  // }
+     zqueue.pop();
+  }
 }
 
 void HookProcessWorker::Execute(const Nan::AsyncProgressQueueWorker<uiohook_event>::ExecutionProgress& progress)
@@ -614,8 +624,8 @@ void HookProcessWorker::Execute(const Nan::AsyncProgressQueueWorker<uiohook_even
 
 void HookProcessWorker::Stop()
 {
-  stop();
   sIsRunning = false;
+  stop();
 }
 
 NAN_METHOD(GrabMouseClick) {
@@ -669,10 +679,10 @@ NAN_METHOD(StartHook) {
       }
       if (info[0]->IsFunction())
       {
+        sIsRunning = true;
         Callback* callback = new Callback(info[0].As<Function>());
         sIOHook = new HookProcessWorker(callback);
         Nan::AsyncQueueWorker(sIOHook);
-        sIsRunning = true;
       }
     }
 
