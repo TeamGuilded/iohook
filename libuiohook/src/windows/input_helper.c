@@ -470,7 +470,14 @@ static int refresh_locale_list() {
 	int count = 0;
 
 	// Get the number of layouts the user has activated.
+	logger(LOG_LEVEL_INFO,	"%s [%u]: GettingKeyboardLayouts...\n",
+				__FUNCTION__, __LINE__);
+
 	int hkl_size = GetKeyboardLayoutList(0, NULL);
+
+	logger(LOG_LEVEL_INFO,	"%s [%u]: Got %i layouts.\n",
+				__FUNCTION__, __LINE__, hkl_size);
+
 	if (hkl_size > 0) {
 		logger(LOG_LEVEL_INFO,	"%s [%u]: GetKeyboardLayoutList(0, NULL) found %i layouts.\n",
 				__FUNCTION__, __LINE__, hkl_size);
@@ -483,6 +490,9 @@ static int refresh_locale_list() {
 
 		int new_size = GetKeyboardLayoutList(hkl_size, hkl_list);
 		if (new_size > 0) {
+			logger(LOG_LEVEL_INFO,	"%s [%u]: GetKeyboardLayoutList new size: %i.\n",
+				__FUNCTION__, __LINE__, new_size);
+
 			if (new_size != hkl_size) {
 				logger(LOG_LEVEL_WARN,	"%s [%u]: Locale size mismatch!  "
 						"Expected %i, received %i!\n",
@@ -647,6 +657,9 @@ static int refresh_locale_list() {
 
 		free(hkl_list);
 		ActivateKeyboardLayout(hlk_default, 0x00);
+	} else {
+		logger(LOG_LEVEL_ERROR,	"%s [%u]: GOT NOT KEYBOARD LAYOUTS! (%#lX)\n",
+					__FUNCTION__, __LINE__, (unsigned long) GetLastError());
 	}
 
 	return count;
