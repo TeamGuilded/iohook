@@ -92,9 +92,9 @@ long long current_time_milliseconds() {
 }
 
 bool logger_proc(unsigned int level, const char *format, ...) {
-  if (!sIsDebug) {
-    return false;
-  }
+  // if (!sIsDebug) {
+  //   return false;
+  // }
 
   bool status = false;
 
@@ -463,7 +463,7 @@ void stop() {
     // Default error.
     case UIOHOOK_FAILURE:
     default:
-      logger_proc(LOG_LEVEL_ERROR, "An unknown hook error occurred ON STOP. (%#X)", status);
+      logger_proc(LOG_LEVEL_ERROR, "An unknown hook error occurred ON STOP ASDF. (%#X)", status);
       break;
   }
 
@@ -491,7 +491,8 @@ HookProcessWorker::HookProcessWorker(Nan::Callback * callback) :
 Nan::AsyncProgressQueueWorker<uiohook_event>(callback),
 fHookExecution(nullptr)
 {
-
+  logger_proc(LOG_LEVEL_DEBUG,  "%s [%u]: HookProcessWorker CONSTRUCTED.\n",
+    __FUNCTION__, __LINE__);
 }
 
 v8::Local<v8::Object> fillEventObject(uiohook_event event) {
